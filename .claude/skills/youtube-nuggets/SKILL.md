@@ -68,6 +68,7 @@ The skill includes helper scripts in the `.claude/skills/youtube-nuggets/` direc
 | `parse_vtt.py` | Parse VTT subtitles into segments.json (cleans HTML entities) |
 | `extract_transcript.py` | Extract transcript with auto sentence boundary detection |
 | `download_clip.py` | Download video clip with retry logic and progress reporting |
+| `burn_subtitles.py` | Generate subtitled video with hardcoded captions |
 | `utils.py` | Shared utilities for timestamp parsing |
 
 ## Transcript Curation (CRITICAL)
@@ -152,15 +153,17 @@ Then manually edit the Transcript.txt file to curate the text before downloading
   ✓ Selected top 2 clips
 
 [CLIP 1/2] "Factory is the Weapon" (08:56 - 10:31)
-  ✓ Why.txt created
+  ✓ metadata.json created
   ✓ Transcript.txt extracted (321 words)
   ✓ Video.mp4 downloaded (14.1 MB)
+  ✓ Subtitled.mp4 created (13.8 MB)
 
 [CLIP 2/2] "Peter Thiel Always Right" (29:59 - 31:17)
-  ✓ Why.txt created
+  ✓ metadata.json created
   ✓ Transcript.txt extracted (307 words)
   ⚠ Download failed (403), retrying...
   ✓ Video.mp4 downloaded (10.4 MB)
+  ✓ Subtitled.mp4 created (10.1 MB)
 
 [DONE] Extracted 2 clips (2m53s total)
 ```
@@ -352,39 +355,47 @@ For each identified clip, record:
 
 ### Phase 4: For Each Clip - Create Files in Order
 
-**Order: Why → Transcript → Video**
+**Order: metadata.json → Transcript.txt → Video.mp4 → Subtitled.mp4**
 
-#### Step 1: Create the "Why" file FIRST
+#### Step 1: Create metadata.json (combines "why" + transcript info)
 
+```python
+import json
+
+clip_metadata = {
+    "title": "Clip Title",
+    "source_video": "Video Title",
+    "video_start": "00:12:06.000",
+    "video_end": "00:14:05.000",
+    "duration_seconds": 119,
+    "word_count": 321,
+    "transcript": "Full transcript text with proper formatting...",
+    "selection_rationale": {
+        "controversy": {
+            "score": 8,
+            "reason": "Explanation of controversy signals found"
+        },
+        "insight": {
+            "score": 9,
+            "reason": "Key insights delivered"
+        },
+        "engagement": {
+            "score": 7,
+            "reason": "Engagement signals found"
+        },
+        "relevance": {
+            "score": 8,
+            "reason": "How it relates to the main topic"
+        }
+    },
+    "actionable_takeaway": "What viewers/investors should do with this information"
+}
+
+with open('Clip Title metadata.json', 'w') as f:
+    json.dump(clip_metadata, f, indent=2)
 ```
-WHY THIS CLIP WAS SELECTED
-==========================
 
-Title: [Clip Title]
-Duration: [calculated from timestamps]
-
-CONTROVERSY SCORE: X/10
------------------------
-[Explanation of controversy signals found]
-
-INSIGHT SCORE: X/10
--------------------
-[Key insights delivered, bullet points]
-
-ENGAGEMENT SCORE: X/10
-----------------------
-[Engagement signals found]
-
-RELEVANCE TO VIDEO TITLE: X/10
--------------------------------
-[How it relates to the main topic]
-
-ACTIONABLE TAKEAWAY
--------------------
-[What viewers/investors should do with this information]
-```
-
-#### Step 2: Extract Transcript with Buffer
+#### Step 2: Create Transcript.txt (human-readable version)
 
 Extract transcript text with a 5-second buffer before and after the video timestamps. This ensures all spoken words in the video clip are captured in the transcript (accounting for keyframe cuts).
 
@@ -465,6 +476,46 @@ yt-dlp -f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' \
   -o "$CLIP_DIR/${SAFE_TITLE} Video.%(ext)s" \
   "$VIDEO_URL"
 ```
+
+#### Step 4: Create Subtitled Video
+
+**ALWAYS create a subtitled version** for social media sharing. Uses ffmpeg to burn subtitles directly into the video with styled captions.
+
+```bash
+# Use the burn_subtitles.py script
+python3 .claude/skills/youtube-nuggets/burn_subtitles.py \
+    --video "$CLIP_DIR/${SAFE_TITLE} Video.mp4" \
+    --segments segments.json \
+    --start "$START_TIME" \
+    --end "$END_TIME" \
+    --output "$CLIP_DIR/${SAFE_TITLE} Subtitled.mp4"
+```
+
+**What it does:**
+1. Reads `segments.json` for accurate word-level timing
+2. Generates SRT subtitles for the clip's time range
+3. Burns subtitles into video using ffmpeg with styling:
+   - Large readable font (24pt)
+   - Semi-transparent black background
+   - White text with black outline
+   - Bottom-center positioning
+
+**Subtitle options:**
+```bash
+# Custom font size (default: 24)
+--font-size 28
+
+# Keep the SRT file (for external use)
+--keep-srt
+
+# When video has buffer before speech starts (sync fix)
+--transcript-start "00:31:38.350"
+
+# When video has buffer after speech ends
+--transcript-end "00:32:50.000"
+```
+
+**Important**: If the video starts a few seconds before the actual speech, use `--transcript-start` to specify when the transcript content begins. This prevents showing subtitles for content before the clip's main topic.
 
 ### Phase 5: Generate Metadata
 
@@ -557,10 +608,52 @@ D) Let me scan the transcript first and suggest topics
 
 - Folder: `YYYY-MM-DD_HH-MM-SS_<video-slug>/`
 - Clips: `NN_<clip-slug>/`
-- Files:
-  - `<Title> Why.txt` (created first)
-  - `<Title> Transcript.txt` (created second)
-  - `<Title> Video.mp4` (created last)
+- Files per clip:
+  - `<Title> metadata.json` - Complete clip info (transcript, timestamps, why selected)
+  - `<Title> Transcript.txt` - Human-readable transcript with formatting
+  - `<Title> Video.mp4` - Raw video clip
+  - `<Title> Subtitled.mp4` - Video with burned-in captions (for social media)
+
+### Per-Clip metadata.json Structure
+
+Each clip folder contains a `metadata.json` with all information combined:
+
+```json
+{
+  "title": "This Is NOT a Bubble",
+  "source_video": "Bitcoin Fear Hits All-Time High",
+  "video_url": "https://www.youtube.com/watch?v=VIDEO_ID&t=1896s",
+  "video_start": "00:31:36.000",
+  "video_end": "00:32:54.000",
+  "transcript_start": "00:31:38.350",
+  "duration_seconds": 78,
+  "word_count": 218,
+  "selection_rationale": {
+    "controversy": {
+      "score": 10,
+      "reason": "Directly calls out Michael Burr and Jeff Gundlach as wrong about AI bubble"
+    },
+    "insight": {
+      "score": 9,
+      "reason": "Data-driven comparison: NDX 800% vs 100%, Nvidia $60B quarterly revenue"
+    },
+    "engagement": {
+      "score": 9,
+      "reason": "Strong emotional conviction, direct callout of famous contrarians"
+    },
+    "relevance": {
+      "score": 9,
+      "reason": "Directly addresses fear sentiment from video title"
+    }
+  },
+  "actionable_takeaway": "Don't conflate extreme fear with bubble conditions. Look at earnings growth and historical comparisons.",
+  "transcript": "Full transcript text here (always last key for readability)..."
+}
+```
+
+**Notes**:
+- `video_url`: Direct link to the clip's start time in the original video (uses `&t=XXXs` parameter)
+- `transcript_start`: Used when video has a buffer before speech starts (ensures subtitle sync)
 
 ## Example Session
 
@@ -572,9 +665,10 @@ D) Let me scan the transcript first and suggest topics
 3. Downloads transcript with exact timestamps
 4. Analyzes transcript, identifies top segments
 5. **For each clip:**
-   - Generates "Why" justification first
-   - Extracts transcript for exact timestamp range
-   - Downloads video using those exact timestamps
+   - Creates metadata.json (transcript + selection rationale + scores)
+   - Creates Transcript.txt (human-readable version)
+   - Downloads video using exact timestamps
+   - Creates subtitled version with burned-in captions
 6. Returns summary with folder location
 
 **User**: Get 3 clips about "startup funding" from https://youtube.com/watch?v=xyz789
@@ -583,5 +677,5 @@ D) Let me scan the transcript first and suggest topics
 1. Same setup
 2. Filters transcript for "startup", "funding", "invest", "raise" keywords
 3. Scores segments with topic_match weighted higher
-4. For each of 3 clips: Why → Transcript → Video
+4. For each of 3 clips: metadata.json → Transcript.txt → Video → Subtitled Video
 5. Returns summary
