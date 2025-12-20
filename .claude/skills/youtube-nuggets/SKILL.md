@@ -59,6 +59,77 @@ sudo apt update && sudo apt install -y ffmpeg
   - Topic focus keywords
   - Min/max clip duration (default: 30s-180s)
 
+## Available Python Scripts
+
+The skill includes helper scripts in the `.claude/skills/youtube-nuggets/` directory:
+
+| Script | Purpose |
+|--------|---------|
+| `parse_vtt.py` | Parse VTT subtitles into segments.json (cleans HTML entities like `&gt;&gt;`) |
+| `extract_transcript.py` | Extract formatted transcript for a clip with buffer |
+| `download_clip.py` | Download video clip with retry logic and progress reporting |
+| `utils.py` | Shared utilities for timestamp parsing |
+
+## Console Progress Reporting
+
+**IMPORTANT**: Provide clear progress updates to the user at each stage:
+
+```
+[SETUP] Fetching video info...
+  ✓ Video: "Title Here" (32 min)
+  ✓ Output: ./clips/2024-01-01_12-00-00_video-slug/
+
+[TRANSCRIPT] Downloading subtitles...
+  ✓ Auto-generated English subtitles found
+  ✓ Parsed 912 segments
+
+[ANALYSIS] Identifying best clips...
+  ✓ Found 5 high-value segments
+  ✓ Selected top 2 clips
+
+[CLIP 1/2] "Factory is the Weapon" (08:56 - 10:31)
+  ✓ Why.txt created
+  ✓ Transcript.txt extracted (321 words)
+  ✓ Video.mp4 downloaded (14.1 MB)
+
+[CLIP 2/2] "Peter Thiel Always Right" (29:59 - 31:17)
+  ✓ Why.txt created
+  ✓ Transcript.txt extracted (307 words)
+  ⚠ Download failed (403), retrying...
+  ✓ Video.mp4 downloaded (10.4 MB)
+
+[DONE] Extracted 2 clips (2m53s total)
+```
+
+## Retry Logic for Downloads
+
+YouTube occasionally returns 403 errors. Always implement retry logic:
+
+```python
+# Use the download_clip.py script with built-in retries
+python3 .claude/skills/youtube-nuggets/download_clip.py \
+    --url "$VIDEO_URL" \
+    --start "00:08:56" \
+    --end "00:10:31" \
+    --output "$CLIP_DIR/Video.mp4" \
+    --retries 3
+```
+
+Or implement inline:
+```python
+import time
+import subprocess
+
+def download_with_retry(cmd, max_retries=3, delay=2):
+    for attempt in range(max_retries):
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            return True
+        print(f"  ⚠ Retry {attempt + 1}/{max_retries}...")
+        time.sleep(delay)
+    return False
+```
+
 ## Complete Workflow
 
 **CRITICAL: The order of operations is WHY → TRANSCRIPT → VIDEO**
@@ -107,7 +178,18 @@ else
 fi
 ```
 
-**Convert VTT to timestamped text - PRESERVE EXACT TIMESTAMPS:**
+**Parse VTT using the skill's Python script:**
+
+```bash
+# Parse VTT file into segments.json and full_transcript.txt
+python3 .claude/skills/youtube-nuggets/parse_vtt.py transcript.en.vtt
+
+# This creates:
+#   - segments.json (for precise timestamp lookup)
+#   - full_transcript.txt (for reading/analysis)
+```
+
+**Alternative inline Python (if script not available):**
 
 ```python
 import re
