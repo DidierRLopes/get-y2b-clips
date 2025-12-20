@@ -2,7 +2,8 @@
 """Generate SRT subtitles and burn them into a video clip.
 
 This script creates subtitled videos optimized for social media sharing.
-Uses ffmpeg's subtitles filter with styling for better readability.
+Uses ffsubsync to automatically sync subtitles with the video's audio,
+then burns them using ffmpeg's subtitles filter with styling.
 
 Usage:
     python burn_subtitles.py --video VIDEO.mp4 --segments segments.json \
@@ -15,6 +16,9 @@ Example:
         --start 00:28:36 \
         --end 00:29:27 \
         --output "01_clip/Video Subtitled.mp4"
+
+Dependencies:
+    pip install ffsubsync
 """
 
 import argparse
@@ -252,6 +256,51 @@ def generate_srt(
     return '\n'.join(srt_lines)
 
 
+def sync_subtitles_with_audio(
+    video_path: str,
+    srt_path: str,
+    output_srt_path: str
+) -> bool:
+    """Use ffsubsync to automatically sync subtitles with video audio.
+
+    ffsubsync uses Voice Activity Detection (VAD) to analyze when speech
+    actually occurs in the audio and aligns subtitles accordingly.
+
+    Args:
+        video_path: Input video file with audio
+        srt_path: Input SRT file (unsynchronized)
+        output_srt_path: Output SRT file (synchronized)
+
+    Returns:
+        True if successful
+    """
+    try:
+        # Try to import ffsubsync
+        result = subprocess.run(
+            ['ffs', video_path, '-i', srt_path, '-o', output_srt_path],
+            capture_output=True,
+            text=True,
+            timeout=120  # 2 minute timeout
+        )
+
+        if result.returncode == 0:
+            return True
+        else:
+            # ffsubsync failed, log error but don't fail completely
+            print(f"{Colors.YELLOW}  ⚠ ffsubsync warning: {result.stderr[:200]}{Colors.RESET}")
+            return False
+
+    except FileNotFoundError:
+        print(f"{Colors.YELLOW}  ⚠ ffsubsync not installed (pip install ffsubsync){Colors.RESET}")
+        return False
+    except subprocess.TimeoutExpired:
+        print(f"{Colors.YELLOW}  ⚠ ffsubsync timed out{Colors.RESET}")
+        return False
+    except Exception as e:
+        print(f"{Colors.YELLOW}  ⚠ ffsubsync error: {e}{Colors.RESET}")
+        return False
+
+
 def burn_subtitles(
     video_path: str,
     srt_path: str,
@@ -356,6 +405,10 @@ def main():
                         help='Fine-tune subtitle timing in seconds. '
                              'Negative = earlier, positive = later. '
                              'Default: 0 (auto-sync aligns first subtitle to video start)')
+    parser.add_argument('--no-auto-sync', action='store_true',
+                        help='Disable ffsubsync auto-synchronization with audio. '
+                             'By default, ffsubsync is used to sync subtitles with '
+                             'the actual audio using voice activity detection.')
 
     args = parser.parse_args()
 
@@ -412,19 +465,45 @@ def main():
     subtitle_count = srt_content.count('\n\n')
     print_success(f"Generated {subtitle_count} subtitle blocks")
 
+    # Use ffsubsync to auto-sync subtitles with audio (unless disabled)
+    synced_srt_path = srt_path
+    if not args.no_auto_sync:
+        # Create a temp file for the synced SRT
+        synced_fd, synced_srt_temp = tempfile.mkstemp(suffix='_synced.srt')
+        os.close(synced_fd)
+        synced_srt_temp = Path(synced_srt_temp)
+
+        sync_success = sync_subtitles_with_audio(
+            video_path=args.video,
+            srt_path=str(srt_path),
+            output_srt_path=str(synced_srt_temp)
+        )
+
+        if sync_success:
+            print_success("Auto-synced subtitles with audio (ffsubsync)")
+            synced_srt_path = synced_srt_temp
+        else:
+            # Fall back to unsynced version
+            print(f"{Colors.YELLOW}  ⚠ Using unsynced subtitles{Colors.RESET}")
+            if synced_srt_temp.exists():
+                synced_srt_temp.unlink()
+
     # Burn subtitles
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     success = burn_subtitles(
         video_path=args.video,
-        srt_path=str(srt_path),
+        srt_path=str(synced_srt_path),
         output_path=args.output,
         font_size=args.font_size
     )
 
-    # Cleanup temp SRT if not keeping
-    if not args.keep_srt and srt_path.exists():
-        srt_path.unlink()
+    # Cleanup temp SRT files if not keeping
+    if not args.keep_srt:
+        if srt_path.exists():
+            srt_path.unlink()
+        if synced_srt_path != srt_path and synced_srt_path.exists():
+            synced_srt_path.unlink()
 
     if success:
         size_mb = Path(args.output).stat().st_size / (1024 * 1024)
