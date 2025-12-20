@@ -2,23 +2,18 @@
 """Generate SRT subtitles and burn them into a video clip.
 
 This script creates subtitled videos optimized for social media sharing.
-Uses ffsubsync to automatically sync subtitles with the video's audio,
+Uses stable-ts (Whisper) for accurate word-level timestamps from audio,
 then burns them using ffmpeg's subtitles filter with styling.
 
 Usage:
-    python burn_subtitles.py --video VIDEO.mp4 --segments segments.json \
-        --start HH:MM:SS --end HH:MM:SS --output VIDEO_subtitled.mp4
+    python burn_subtitles.py --video VIDEO.mp4 --output VIDEO_subtitled.mp4
 
-Example:
-    python burn_subtitles.py \
-        --video "01_clip/Video.mp4" \
-        --segments segments.json \
-        --start 00:28:36 \
-        --end 00:29:27 \
-        --output "01_clip/Video Subtitled.mp4"
+    # Or use YouTube transcript (legacy mode):
+    python burn_subtitles.py --video VIDEO.mp4 --segments segments.json \
+        --start HH:MM:SS --end HH:MM:SS --output VIDEO_subtitled.mp4 --use-youtube-transcript
 
 Dependencies:
-    pip install ffsubsync
+    pip install stable-ts
 """
 
 import argparse
@@ -256,48 +251,43 @@ def generate_srt(
     return '\n'.join(srt_lines)
 
 
-def sync_subtitles_with_audio(
+def transcribe_with_whisper(
     video_path: str,
-    srt_path: str,
-    output_srt_path: str
+    output_srt_path: str,
+    model_name: str = "base"
 ) -> bool:
-    """Use ffsubsync to automatically sync subtitles with video audio.
+    """Transcribe video audio using stable-ts (Whisper) for accurate timestamps.
 
-    ffsubsync uses Voice Activity Detection (VAD) to analyze when speech
-    actually occurs in the audio and aligns subtitles accordingly.
+    stable-ts uses Dynamic Time Warping and cross-attention patterns to get
+    word-level timestamps that are precisely aligned with the audio.
 
     Args:
-        video_path: Input video file with audio
-        srt_path: Input SRT file (unsynchronized)
-        output_srt_path: Output SRT file (synchronized)
+        video_path: Input video file
+        output_srt_path: Output SRT file path
+        model_name: Whisper model size (tiny, base, small, medium, large)
 
     Returns:
         True if successful
     """
     try:
-        # Try to import ffsubsync
-        result = subprocess.run(
-            ['ffs', video_path, '-i', srt_path, '-o', output_srt_path],
-            capture_output=True,
-            text=True,
-            timeout=120  # 2 minute timeout
-        )
+        import stable_whisper
 
-        if result.returncode == 0:
-            return True
-        else:
-            # ffsubsync failed, log error but don't fail completely
-            print(f"{Colors.YELLOW}  ⚠ ffsubsync warning: {result.stderr[:200]}{Colors.RESET}")
-            return False
+        # Load model
+        model = stable_whisper.load_model(model_name)
 
-    except FileNotFoundError:
-        print(f"{Colors.YELLOW}  ⚠ ffsubsync not installed (pip install ffsubsync){Colors.RESET}")
-        return False
-    except subprocess.TimeoutExpired:
-        print(f"{Colors.YELLOW}  ⚠ ffsubsync timed out{Colors.RESET}")
+        # Transcribe with word-level timestamps
+        result = model.transcribe(video_path)
+
+        # Save to SRT
+        result.to_srt_vtt(output_srt_path, word_level=False)
+
+        return True
+
+    except ImportError:
+        print_error("stable-ts not installed (pip install stable-ts)")
         return False
     except Exception as e:
-        print(f"{Colors.YELLOW}  ⚠ ffsubsync error: {e}{Colors.RESET}")
+        print_error(f"Whisper transcription failed: {e}")
         return False
 
 
@@ -379,36 +369,38 @@ def burn_subtitles(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Generate subtitled video from segments'
+        description='Generate subtitled video using Whisper for accurate timestamps'
     )
     parser.add_argument('--video', '-v', required=True,
                         help='Input video file')
-    parser.add_argument('--segments', '-s', required=True,
-                        help='Path to segments.json')
-    parser.add_argument('--start', required=True,
-                        help='Video start timestamp (HH:MM:SS)')
-    parser.add_argument('--end', required=True,
-                        help='Video end timestamp (HH:MM:SS)')
     parser.add_argument('--output', '-o', required=True,
                         help='Output video file path')
     parser.add_argument('--font-size', type=int, default=24,
                         help='Subtitle font size (default: 24)')
     parser.add_argument('--keep-srt', action='store_true',
                         help='Keep the generated SRT file')
-    parser.add_argument('--transcript-start',
-                        help='Transcript start timestamp (defaults to --start). '
-                             'Use when video has buffer before speech starts.')
-    parser.add_argument('--transcript-end',
-                        help='Transcript end timestamp (defaults to --end). '
-                             'Use when video has buffer after speech ends.')
-    parser.add_argument('--offset', type=float, default=0.0,
-                        help='Fine-tune subtitle timing in seconds. '
-                             'Negative = earlier, positive = later. '
-                             'Default: 0 (auto-sync aligns first subtitle to video start)')
-    parser.add_argument('--no-auto-sync', action='store_true',
-                        help='Disable ffsubsync auto-synchronization with audio. '
-                             'By default, ffsubsync is used to sync subtitles with '
-                             'the actual audio using voice activity detection.')
+    parser.add_argument('--whisper-model', default='base',
+                        choices=['tiny', 'base', 'small', 'medium', 'large'],
+                        help='Whisper model size (default: base). '
+                             'Larger models are more accurate but slower.')
+
+    # Legacy YouTube transcript mode
+    legacy = parser.add_argument_group('Legacy mode (YouTube transcript)')
+    legacy.add_argument('--use-youtube-transcript', action='store_true',
+                        help='Use YouTube transcript instead of Whisper. '
+                             'Requires --segments, --start, --end.')
+    legacy.add_argument('--segments', '-s',
+                        help='Path to segments.json (legacy mode)')
+    legacy.add_argument('--start',
+                        help='Video start timestamp HH:MM:SS (legacy mode)')
+    legacy.add_argument('--end',
+                        help='Video end timestamp HH:MM:SS (legacy mode)')
+    legacy.add_argument('--transcript-start',
+                        help='Transcript start timestamp (legacy mode)')
+    legacy.add_argument('--transcript-end',
+                        help='Transcript end timestamp (legacy mode)')
+    legacy.add_argument('--offset', type=float, default=0.0,
+                        help='Time offset in seconds (legacy mode)')
 
     args = parser.parse_args()
 
@@ -417,93 +409,89 @@ def main():
         print_error(f"Video not found: {args.video}")
         sys.exit(1)
 
-    if not Path(args.segments).exists():
-        print_error(f"Segments file not found: {args.segments}")
-        sys.exit(1)
+    print_stage("Creating subtitled video")
 
-    print_stage(f"Creating subtitled video")
-
-    # Load segments
-    with open(args.segments, 'r', encoding='utf-8') as f:
-        segments = json.load(f)
-
-    # Parse timestamps
-    video_start_sec = parse_timestamp(args.start)
-    video_end_sec = parse_timestamp(args.end)
-
-    # Parse optional transcript bounds
-    transcript_start_sec = parse_timestamp(args.transcript_start) if args.transcript_start else None
-    transcript_end_sec = parse_timestamp(args.transcript_end) if args.transcript_end else None
-
-    # Generate SRT content
-    srt_content = generate_srt(
-        segments,
-        video_start_sec,
-        video_end_sec,
-        transcript_start_sec,
-        transcript_end_sec,
-        time_offset=args.offset
-    )
-
-    if not srt_content:
-        print_error("No subtitles generated - check time range")
-        sys.exit(1)
-
-    # Write SRT file (temporary or permanent)
     output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Determine SRT path
     if args.keep_srt:
         srt_path = output_path.with_suffix('.srt')
     else:
-        # Use temp file
         srt_fd, srt_path = tempfile.mkstemp(suffix='.srt')
         os.close(srt_fd)
         srt_path = Path(srt_path)
 
-    with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(srt_content)
+    # Generate subtitles using Whisper (default) or YouTube transcript (legacy)
+    if args.use_youtube_transcript:
+        # Legacy mode: use YouTube transcript
+        if not args.segments or not args.start or not args.end:
+            print_error("Legacy mode requires --segments, --start, and --end")
+            sys.exit(1)
 
-    subtitle_count = srt_content.count('\n\n')
-    print_success(f"Generated {subtitle_count} subtitle blocks")
+        if not Path(args.segments).exists():
+            print_error(f"Segments file not found: {args.segments}")
+            sys.exit(1)
 
-    # Use ffsubsync to auto-sync subtitles with audio (unless disabled)
-    synced_srt_path = srt_path
-    if not args.no_auto_sync:
-        # Create a temp file for the synced SRT
-        synced_fd, synced_srt_temp = tempfile.mkstemp(suffix='_synced.srt')
-        os.close(synced_fd)
-        synced_srt_temp = Path(synced_srt_temp)
+        print(f"{Colors.DIM}  Using YouTube transcript (legacy mode){Colors.RESET}")
 
-        sync_success = sync_subtitles_with_audio(
-            video_path=args.video,
-            srt_path=str(srt_path),
-            output_srt_path=str(synced_srt_temp)
+        with open(args.segments, 'r', encoding='utf-8') as f:
+            segments = json.load(f)
+
+        video_start_sec = parse_timestamp(args.start)
+        video_end_sec = parse_timestamp(args.end)
+        transcript_start_sec = parse_timestamp(args.transcript_start) if args.transcript_start else None
+        transcript_end_sec = parse_timestamp(args.transcript_end) if args.transcript_end else None
+
+        srt_content = generate_srt(
+            segments,
+            video_start_sec,
+            video_end_sec,
+            transcript_start_sec,
+            transcript_end_sec,
+            time_offset=args.offset
         )
 
-        if sync_success:
-            print_success("Auto-synced subtitles with audio (ffsubsync)")
-            synced_srt_path = synced_srt_temp
-        else:
-            # Fall back to unsynced version
-            print(f"{Colors.YELLOW}  ⚠ Using unsynced subtitles{Colors.RESET}")
-            if synced_srt_temp.exists():
-                synced_srt_temp.unlink()
+        if not srt_content:
+            print_error("No subtitles generated - check time range")
+            sys.exit(1)
 
-    # Burn subtitles
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(srt_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
 
+        subtitle_count = srt_content.count('\n\n')
+        print_success(f"Generated {subtitle_count} subtitle blocks (YouTube transcript)")
+
+    else:
+        # Default: use Whisper for accurate timestamps
+        print(f"{Colors.DIM}  Transcribing with Whisper ({args.whisper_model} model)...{Colors.RESET}")
+
+        success = transcribe_with_whisper(
+            video_path=args.video,
+            output_srt_path=str(srt_path),
+            model_name=args.whisper_model
+        )
+
+        if not success:
+            print_error("Failed to transcribe video")
+            sys.exit(1)
+
+        # Count subtitle blocks
+        with open(srt_path, 'r', encoding='utf-8') as f:
+            subtitle_count = f.read().count('\n\n')
+        print_success(f"Transcribed {subtitle_count} subtitle blocks (Whisper)")
+
+    # Burn subtitles into video
     success = burn_subtitles(
         video_path=args.video,
-        srt_path=str(synced_srt_path),
+        srt_path=str(srt_path),
         output_path=args.output,
         font_size=args.font_size
     )
 
-    # Cleanup temp SRT files if not keeping
-    if not args.keep_srt:
-        if srt_path.exists():
-            srt_path.unlink()
-        if synced_srt_path != srt_path and synced_srt_path.exists():
-            synced_srt_path.unlink()
+    # Cleanup temp SRT if not keeping
+    if not args.keep_srt and srt_path.exists():
+        srt_path.unlink()
 
     if success:
         size_mb = Path(args.output).stat().st_size / (1024 * 1024)
