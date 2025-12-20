@@ -61,6 +61,10 @@ sudo apt update && sudo apt install -y ffmpeg
 
 ## Complete Workflow
 
+**CRITICAL: The order of operations is WHY → TRANSCRIPT → VIDEO**
+
+The "Why" justifies the selection, the transcript defines the EXACT timestamps, and the video is downloaded to match those exact timestamps.
+
 ### Phase 1: Setup
 
 ```bash
@@ -82,7 +86,7 @@ mkdir -p "$OUTPUT_DIR"
 echo "Output folder: $OUTPUT_DIR"
 ```
 
-### Phase 2: Get Transcript
+### Phase 2: Get Transcript with Exact Timestamps
 
 **Priority order: Manual subtitles → Auto-generated → Whisper**
 
@@ -103,63 +107,71 @@ else
 fi
 ```
 
-**Convert VTT to timestamped text:**
+**Convert VTT to timestamped text - PRESERVE EXACT TIMESTAMPS:**
 
-```bash
-VTT_FILE=$(ls transcript*.vtt 2>/dev/null | head -n 1)
-
-python3 << 'PYTHON_SCRIPT'
+```python
 import re
-import sys
+import json
 
 def parse_vtt(filename):
     with open(filename, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Pattern to match timestamps and text
-    pattern = r'(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\n(.*?)(?=\n\n|\Z)'
-    matches = re.findall(pattern, content, re.DOTALL)
-
+    lines = content.split('\n')
     segments = []
+    current_start = None
+    current_end = None
     seen_text = set()
 
-    for start, end, text in matches:
-        # Clean text
-        text = re.sub(r'<[^>]+>', '', text)  # Remove tags
-        text = text.replace('&amp;', '&').replace('&gt;', '>').replace('&lt;', '<')
-        text = ' '.join(text.split())  # Normalize whitespace
+    for line in lines:
+        line = line.strip()
 
-        if text and text not in seen_text:
+        # Check if this is a timestamp line
+        time_match = re.match(r'^(\d{2}:\d{2}:\d{2})\.(\d{3}) --> (\d{2}:\d{2}:\d{2})\.(\d{3})', line)
+        if time_match:
+            current_start = f"{time_match.group(1)}.{time_match.group(2)}"
+            current_end = f"{time_match.group(3)}.{time_match.group(4)}"
+            continue
+
+        # Skip metadata and empty lines
+        if not line or line.startswith('WEBVTT') or line.startswith('Kind:') or line.startswith('Language:'):
+            continue
+
+        # Skip lines with tags (word-by-word breakdowns)
+        if '<' in line:
+            continue
+
+        # This is a clean text line
+        text = line.strip()
+        if text and text not in seen_text and current_start:
             seen_text.add(text)
             segments.append({
-                'start': start,
-                'end': end,
+                'start': current_start,
+                'end': current_end,
                 'text': text
             })
 
     return segments
 
-segments = parse_vtt("$VTT_FILE")
+segments = parse_vtt("transcript.en.vtt")
 
 # Write full transcript with timestamps
 with open('full_transcript.txt', 'w') as f:
     for seg in segments:
-        f.write(f"[{seg['start'][:8]}] {seg['text']}\n")
+        f.write(f"[{seg['start']}] {seg['text']}\n")
 
-# Write segments JSON for analysis
-import json
+# Write segments JSON for precise timestamp lookup
 with open('segments.json', 'w') as f:
     json.dump(segments, f, indent=2)
 
-print(f"Parsed {len(segments)} segments")
-PYTHON_SCRIPT
+print(f"Parsed {len(segments)} segments with exact timestamps")
 ```
 
-### Phase 3: Analyze Content
+### Phase 3: Analyze Content & Generate "Why" FIRST
 
-**Read the transcript and identify valuable segments.**
+**This is the critical phase - identify segments and justify selection BEFORE extracting.**
 
-Use Claude's analysis to score segments based on:
+Read `full_transcript.txt` and analyze using these scoring criteria:
 
 1. **Controversy Signals** (weight: 0.30)
    - "I disagree", "controversial", "unpopular opinion"
@@ -182,87 +194,166 @@ Use Claude's analysis to score segments based on:
    - Keyword presence
    - Semantic relevance
 
-**Analysis approach:**
-1. Read `full_transcript.txt`
-2. Identify natural topic boundaries (every 2-5 minutes typically)
-3. Score each segment
-4. Select top N segments (user-specified or auto: 3-5)
-5. Determine optimal clip boundaries (include context, avoid mid-sentence cuts)
+**Analysis output - use EXACT timestamps from transcript:**
 
-**Output analysis as JSON:**
-```json
-{
-  "clips": [
-    {
-      "title": "Controversial Take on AI Regulation",
-      "start_time": "00:23:45",
-      "end_time": "00:26:30",
-      "score": 0.87,
-      "why": "Speaker makes bold claim that AI regulation will backfire, cites specific data, directly challenges mainstream view"
-    }
-  ]
-}
+For each identified clip, record:
+1. **Title**: Short descriptive name
+2. **Start timestamp**: EXACT timestamp from first line of segment (from segments.json)
+3. **End timestamp**: EXACT timestamp from last line of segment (from segments.json)
+4. **Why**: Full justification with scores
+
+**IMPORTANT**: The start and end times MUST come from the transcript timestamps. Do not approximate or round. The video will be cut to match these exact times.
+
+### Phase 4: For Each Clip - Create Files in Order
+
+**Order: Why → Transcript → Video**
+
+#### Step 1: Create the "Why" file FIRST
+
+```
+WHY THIS CLIP WAS SELECTED
+==========================
+
+Title: [Clip Title]
+Duration: [calculated from timestamps]
+
+CONTROVERSY SCORE: X/10
+-----------------------
+[Explanation of controversy signals found]
+
+INSIGHT SCORE: X/10
+-------------------
+[Key insights delivered, bullet points]
+
+ENGAGEMENT SCORE: X/10
+----------------------
+[Engagement signals found]
+
+RELEVANCE TO VIDEO TITLE: X/10
+-------------------------------
+[How it relates to the main topic]
+
+ACTIONABLE TAKEAWAY
+-------------------
+[What viewers/investors should do with this information]
 ```
 
-### Phase 4: Extract Clips
+#### Step 2: Extract Transcript with Buffer
 
-**For each identified segment:**
+Extract transcript text with a 5-second buffer before and after the video timestamps. This ensures all spoken words in the video clip are captured in the transcript (accounting for keyframe cuts).
+
+**Key rules:**
+- **Clean text only** - no timestamps in the output
+- **5-second buffer** - transcript covers slightly more than the video
+- **Proper formatting** - capitalize first letter of sentences, new line for each sentence
+- **Readable flow** - sentences separated by blank lines for easy reading
+
+**Formatting the transcript:**
+1. Join all segment text together
+2. Split on sentence boundaries (. ! ?)
+3. Capitalize first letter of each sentence
+4. Write each sentence on its own line with blank line between
+
+```python
+import json
+import re
+
+# Load segments
+with open('segments.json', 'r') as f:
+    segments = json.load(f)
+
+# Define VIDEO boundaries (what will be downloaded)
+video_start = "00:12:06.000"
+video_end = "00:14:05.000"
+
+# Define TRANSCRIPT boundaries (5-second buffer)
+transcript_start = "00:12:01.000"  # 5s before video
+transcript_end = "00:14:10.000"    # 5s after video
+
+# Extract matching segments
+clip_text = []
+for seg in segments:
+    if seg['start'] >= transcript_start and seg['start'] <= transcript_end:
+        clip_text.append(seg['text'])
+
+# Join and format nicely
+raw_text = ' '.join(clip_text)
+
+# Split into sentences and format
+sentences = re.split(r'(?<=[.!?])\s+', raw_text)
+formatted_sentences = []
+for s in sentences:
+    s = s.strip()
+    if s:
+        # Capitalize first letter
+        s = s[0].upper() + s[1:] if len(s) > 1 else s.upper()
+        formatted_sentences.append(s)
+
+# Write clean, formatted transcript
+with open('Clip_Title Transcript.txt', 'w') as f:
+    f.write(f"Clip Title - Transcript\n")
+    f.write(f"Source: Video Title\n")
+    f.write(f"Video: {video_start[:8]} - {video_end[:8]}\n\n---\n\n")
+    f.write('\n\n'.join(formatted_sentences))  # Each sentence on new line
+```
+
+#### Step 3: Download Video using EXACT timestamps
+
+**CRITICAL**: Use the same timestamps from the transcript extraction.
 
 ```bash
-CLIP_NUM=1
-START_TIME="00:23:45"
-END_TIME="00:26:30"
-CLIP_TITLE="Controversial Take on AI Regulation"
+START_TIME="00:12:06"  # Must match transcript start
+END_TIME="00:14:05"    # Must match transcript end
+CLIP_TITLE="Clip Title"
 SAFE_TITLE=$(echo "$CLIP_TITLE" | tr '/:?*"<>|\\' '-')
 
 # Create clip folder
-CLIP_DIR="$OUTPUT_DIR/$(printf '%02d' $CLIP_NUM)_$(echo "$SAFE_TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | cut -c1-40)"
+CLIP_DIR="$OUTPUT_DIR/01_$(echo "$SAFE_TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | cut -c1-40)"
 mkdir -p "$CLIP_DIR"
 
-# Download video clip
+# Download video clip with EXACT timestamps
 yt-dlp -f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' \
   --download-sections "*${START_TIME}-${END_TIME}" \
   --force-keyframes-at-cuts \
   --merge-output-format mp4 \
   -o "$CLIP_DIR/${SAFE_TITLE} Video.%(ext)s" \
   "$VIDEO_URL"
-
-# If above fails, try simpler format
-if [ ! -f "$CLIP_DIR/${SAFE_TITLE} Video.mp4" ]; then
-  yt-dlp -f 'best[height<=1080]' \
-    --download-sections "*${START_TIME}-${END_TIME}" \
-    --force-keyframes-at-cuts \
-    -o "$CLIP_DIR/${SAFE_TITLE} Video.%(ext)s" \
-    "$VIDEO_URL"
-fi
 ```
-
-**Create transcript file:**
-Extract the relevant portion from full_transcript.txt for the clip's timeframe and save to `<Title> Transcript.txt`
-
-**Create why file:**
-Write the explanation of why this clip was selected to `<Title> Why.txt`
 
 ### Phase 5: Generate Metadata
 
-```bash
-cat > "$OUTPUT_DIR/metadata.json" << EOF
+```json
 {
   "source": {
-    "url": "$VIDEO_URL",
-    "title": "$VIDEO_TITLE",
-    "video_id": "$VIDEO_ID",
-    "duration_seconds": $VIDEO_DURATION
+    "url": "VIDEO_URL",
+    "title": "VIDEO_TITLE",
+    "video_id": "VIDEO_ID",
+    "duration_seconds": DURATION
   },
   "extraction": {
-    "date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-    "output_dir": "$OUTPUT_DIR",
-    "clip_count": $TOTAL_CLIPS,
-    "topic_filter": $TOPIC_FILTER_JSON
+    "date": "ISO_TIMESTAMP",
+    "output_dir": "OUTPUT_DIR",
+    "clip_count": N,
+    "topic_filter": null
   },
-  "clips": $CLIPS_JSON
+  "clips": [
+    {
+      "index": 1,
+      "folder": "01_clip_slug",
+      "title": "Clip Title",
+      "start_time": "00:12:06.000",
+      "end_time": "00:14:05.000",
+      "duration_seconds": 119,
+      "scores": {
+        "controversy": 0.9,
+        "insight": 0.9,
+        "engagement": 0.8,
+        "overall": 0.87
+      },
+      "summary": "Brief description"
+    }
+  ]
 }
-EOF
 ```
 
 ### Phase 6: Summary
@@ -270,22 +361,17 @@ EOF
 Display to user:
 - Number of clips extracted
 - Total clip duration
-- List of clips with titles and timestamps
+- List of clips with titles and EXACT timestamps
 - Output folder location
 
-```
-Extraction Complete!
+## Timestamp Alignment Rules
 
-Source: [Video Title]
-Duration: X minutes
-Clips Extracted: N
+**These rules ensure video matches transcript exactly:**
 
-1. "Controversial Take on AI Regulation" (00:23:45 - 00:26:30) - 2:45
-2. "Surprising Market Prediction" (01:12:00 - 01:14:30) - 2:30
-3. "Heated Debate on Crypto" (01:45:15 - 01:48:00) - 2:45
-
-Output: ./clips/2024-12-20_10-30-00_video-title/
-```
+1. **Source of truth**: The VTT transcript timestamps are the source of truth
+2. **No rounding**: Use timestamps exactly as they appear in segments.json
+3. **Verify alignment**: The first and last words in `Transcript.txt` should match the first and last words spoken in `Video.mp4`
+4. **Buffer if needed**: If a sentence is cut mid-word, extend to the next segment boundary
 
 ## Clip Duration Guidelines
 
@@ -319,15 +405,16 @@ D) Let me scan the transcript first and suggest topics
 | Clip download fails | Retry with simpler format `-f best` |
 | Private video | Inform user, cannot proceed |
 | Very short video | Suggest 1 clip or full download |
+| Timestamp mismatch | Re-verify against segments.json |
 
 ## Output File Naming
 
 - Folder: `YYYY-MM-DD_HH-MM-SS_<video-slug>/`
 - Clips: `NN_<clip-slug>/`
 - Files:
-  - `<Title> Video.mp4`
-  - `<Title> Transcript.txt`
-  - `<Title> Why.txt`
+  - `<Title> Why.txt` (created first)
+  - `<Title> Transcript.txt` (created second)
+  - `<Title> Video.mp4` (created last)
 
 ## Example Session
 
@@ -336,9 +423,12 @@ D) Let me scan the transcript first and suggest topics
 **Claude**:
 1. Checks dependencies (yt-dlp, ffmpeg)
 2. Gets video info: "AI Future Podcast - 1:45:00"
-3. Downloads transcript
-4. Analyzes for top 5 segments
-5. Extracts each clip with video, transcript, and rationale
+3. Downloads transcript with exact timestamps
+4. Analyzes transcript, identifies top segments
+5. **For each clip:**
+   - Generates "Why" justification first
+   - Extracts transcript for exact timestamp range
+   - Downloads video using those exact timestamps
 6. Returns summary with folder location
 
 **User**: Get 3 clips about "startup funding" from https://youtube.com/watch?v=xyz789
@@ -347,5 +437,5 @@ D) Let me scan the transcript first and suggest topics
 1. Same setup
 2. Filters transcript for "startup", "funding", "invest", "raise" keywords
 3. Scores segments with topic_match weighted higher
-4. Extracts exactly 3 most relevant clips
+4. For each of 3 clips: Why → Transcript → Video
 5. Returns summary
