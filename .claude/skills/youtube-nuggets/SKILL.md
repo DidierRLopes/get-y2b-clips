@@ -65,10 +65,74 @@ The skill includes helper scripts in the `.claude/skills/youtube-nuggets/` direc
 
 | Script | Purpose |
 |--------|---------|
-| `parse_vtt.py` | Parse VTT subtitles into segments.json (cleans HTML entities like `&gt;&gt;`) |
-| `extract_transcript.py` | Extract formatted transcript for a clip with buffer |
+| `parse_vtt.py` | Parse VTT subtitles into segments.json (cleans HTML entities) |
+| `extract_transcript.py` | Extract transcript with auto sentence boundary detection |
 | `download_clip.py` | Download video clip with retry logic and progress reporting |
 | `utils.py` | Shared utilities for timestamp parsing |
+
+## Transcript Curation (CRITICAL)
+
+**Auto-generated YouTube captions lack punctuation.** The transcript must be manually curated to ensure:
+
+1. **Complete starting sentence**: Must begin with a coherent thought, not mid-sentence
+2. **Complete ending sentence**: Must end with a complete thought, not cut off
+3. **Proper formatting**: Sentences on separate lines with blank lines between
+4. **Punctuation added**: Add periods, commas, question marks as needed
+
+### Workflow: Transcript → Video (Not the reverse!)
+
+```
+1. Identify target timestamps (where the insight is)
+2. Run extract_transcript.py to get raw extraction + suggested video timestamps
+3. MANUALLY CURATE the transcript:
+   - Ensure first sentence is complete (may need to trim start)
+   - Ensure last sentence is complete (may need to extend/trim end)
+   - Add punctuation and formatting
+   - Split into readable paragraphs
+4. Use the VIDEO_START and VIDEO_END from script output
+   - Video should start ~2s BEFORE first word of transcript
+   - Video should end ~2s AFTER last word of transcript
+5. Download video using those curated timestamps
+```
+
+### Example Curation:
+
+**Raw extraction** (bad):
+```
+Successful why do you think we're learned and it turns out that many or most of the people in The Venture business...
+```
+
+**Curated** (good):
+```
+It turns out that many or most of the people in the venture business historically would answer that question by telling you they finance the best and brightest, the greatest managers.
+
+We do not.
+
+We have always focused on the market - the size of the market, the dynamics of the market, the nature of the competition.
+
+Because our objective always was to build big companies.
+
+If you don't attack a big market, it's highly unlikely you're ever going to build a big company.
+```
+
+### Using extract_transcript.py
+
+```bash
+# Run the script to get raw extraction and video timestamps
+python3 extract_transcript.py \
+    --start 00:04:00 \        # Target start (where insight begins)
+    --end 00:05:08 \          # Target end (where insight ends)
+    --title "Clip Title" \
+    --source "Video Title" \
+    --output "clip_folder/Transcript.txt" \
+    --json                     # Also outputs JSON with timestamps
+
+# Output will show:
+#   VIDEO_START=00:03:58      <- Use this for video download
+#   VIDEO_END=00:05:10        <- Use this for video download
+```
+
+Then manually edit the Transcript.txt file to curate the text before downloading the video.
 
 ## Console Progress Reporting
 
