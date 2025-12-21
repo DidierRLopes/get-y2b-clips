@@ -1,0 +1,29 @@
+{
+  "name": "y2b-nuggets",
+  "owner": {
+    "name": "DidierRLopes",
+    "email": "didierrlopes@gmail.com"
+  },
+  "metadata": {
+    "description": "Extract the most valuable clips from YouTube videos automatically (including embedded subtitles, transcript and reason for engaging clip).",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "youtube-nuggets",
+      "source": "./.claude/skills/youtube-nuggets",
+      "description": "Extract the most meaningful, engaging clips from YouTube videos. Analyzes transcripts to find high-value segments based on controversy, insightful analysis, or user-specified topics.",
+      "version": "1.0.0",
+      "author": "DidierRLopes",
+      "keywords": [
+        "youtube",
+        "video",
+        "clips",
+        "transcript",
+        "highlights",
+        "nuggets"
+      ],
+      "category": "media"
+    }
+  ]
+}
