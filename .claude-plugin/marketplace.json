@@ -14,7 +14,10 @@
       "source": "./.claude/skills/youtube-nuggets",
       "description": "Extract the most meaningful, engaging clips from YouTube videos. Analyzes transcripts to find high-value segments based on controversy, insightful analysis, or user-specified topics.",
       "version": "1.0.0",
-      "author": "DidierRLopes",
+      "author": {
+        "name": "DidierRLopes",
+        "email": "didierrlopes@gmail.com"
+      },
       "keywords": [
         "youtube",
         "video",
