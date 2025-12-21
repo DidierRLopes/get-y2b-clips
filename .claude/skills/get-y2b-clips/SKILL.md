@@ -1,5 +1,5 @@
 ---
-name: youtube-nuggets
+name: get-y2b-clips
 description: Extract the most meaningful, engaging clips from YouTube videos. Use when user provides a YouTube URL and wants to find highlights, best moments, controversial takes, or valuable segments. Supports specifying number of clips or topic focus.
 allowed-tools: Bash,Read,Write,Glob
 ---
@@ -61,7 +61,7 @@ sudo apt update && sudo apt install -y ffmpeg
 
 ## Available Python Scripts
 
-The skill includes helper scripts in the `.claude/skills/youtube-nuggets/` directory:
+The skill includes helper scripts in the `.claude/skills/get-y2b-clips/` directory:
 
 | Script | Purpose |
 |--------|---------|
@@ -174,7 +174,7 @@ YouTube occasionally returns 403 errors. Always implement retry logic:
 
 ```python
 # Use the download_clip.py script with built-in retries
-python3 .claude/skills/youtube-nuggets/download_clip.py \
+python3 .claude/skills/get-y2b-clips/download_clip.py \
     --url "$VIDEO_URL" \
     --start "00:08:56" \
     --end "00:10:31" \
@@ -249,7 +249,7 @@ fi
 
 ```bash
 # Parse VTT file into segments.json and full_transcript.txt
-python3 .claude/skills/youtube-nuggets/parse_vtt.py transcript.en.vtt
+python3 .claude/skills/get-y2b-clips/parse_vtt.py transcript.en.vtt
 
 # This creates:
 #   - segments.json (for precise timestamp lookup)
@@ -483,7 +483,7 @@ yt-dlp -f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' \
 
 ```bash
 # Use the burn_subtitles.py script
-python3 .claude/skills/youtube-nuggets/burn_subtitles.py \
+python3 .claude/skills/get-y2b-clips/burn_subtitles.py \
     --video "$CLIP_DIR/${SAFE_TITLE} Video.mp4" \
     --segments segments.json \
     --start "$START_TIME" \

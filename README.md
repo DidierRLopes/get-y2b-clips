@@ -95,7 +95,7 @@ Clips are scored on:
 
 ## Available Scripts
 
-The skill includes helper scripts in `.claude/skills/youtube-nuggets/`:
+The skill includes helper scripts in `.claude/skills/get-y2b-clips/`:
 
 | Script | Purpose |
 |--------|---------|

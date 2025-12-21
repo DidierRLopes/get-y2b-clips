@@ -1,4 +1,4 @@
-"""Shared utilities for youtube-nuggets skill."""
+"""Shared utilities for get-y2b-clips skill."""
 
 import re
 from typing import List, Dict
