@@ -27,6 +27,25 @@
         "nuggets"
       ],
       "category": "media"
+    },
+    {
+      "name": "add-subtitles",
+      "source": "./.claude/skills/add-subtitles",
+      "description": "Add burned-in subtitles to a video the user uploads or points to on disk. Transcribes the audio with Whisper and burns styled captions directly into the video.",
+      "version": "1.0.0",
+      "author": {
+        "name": "DidierRLopes",
+        "email": "didierrlopes@gmail.com"
+      },
+      "keywords": [
+        "video",
+        "subtitles",
+        "captions",
+        "whisper",
+        "transcribe",
+        "ffmpeg"
+      ],
+      "category": "media"
     }
   ]
 }
