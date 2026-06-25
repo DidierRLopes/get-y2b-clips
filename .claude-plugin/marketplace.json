@@ -46,6 +46,25 @@
         "ffmpeg"
       ],
       "category": "media"
+    },
+    {
+      "name": "extract-y2b-insights",
+      "source": "./.claude/skills/extract-y2b-insights",
+      "description": "Extract the most controversial or genuinely-novel insights from a YouTube video and output them both as a .txt file and printed in the terminal. Optionally web-checks ideas for novelty.",
+      "version": "1.0.0",
+      "author": {
+        "name": "DidierRLopes",
+        "email": "didierrlopes@gmail.com"
+      },
+      "keywords": [
+        "youtube",
+        "insights",
+        "ideas",
+        "controversial",
+        "novel",
+        "transcript"
+      ],
+      "category": "media"
     }
   ]
 }
